@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 type Fetcher interface {
@@ -11,17 +12,7 @@ type Fetcher interface {
 	Fetch(url string) (body string, urls []string, err error)
 }
 
-type CacheFetcher struct {
-	Body  string
-	Urls  []string
-	Error error
-}
-
-func (cacheFetcher CacheFetcher) Fetch(url string) (string, []string, error) {
-	return cacheFetcher.Body, cacheFetcher.Urls, cacheFetcher.Error
-}
-
-var cacheURL = make(map[string]CacheFetcher)
+var cacheURL = make(map[string]bool)
 var mutex sync.Mutex
 
 // Crawl uses fetcher to recursively crawl
@@ -40,20 +31,15 @@ func Crawl(url string, depth int, fetcher Fetcher) {
 		var urls []string
 		var err error
 		mutex.Lock()
-		cacheFetcher, existingCacheFetcher := cacheURL[url]
+		_, existingCacheFetcher := cacheURL[url]
 		mutex.Unlock()
 		if existingCacheFetcher {
-			body, urls, err = cacheFetcher.Fetch(url)
-		} else {
-			body, urls, err = fetcher.Fetch(url)
-			mutex.Lock()
-			cacheURL[url] = CacheFetcher{
-				Body:  body,
-				Urls:  urls,
-				Error: err,
-			}
-			mutex.Unlock()
+			return
 		}
+		body, urls, err = fetcher.Fetch(url)
+		mutex.Lock()
+		cacheURL[url] = true
+		mutex.Unlock()
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -62,14 +48,14 @@ func Crawl(url string, depth int, fetcher Fetcher) {
 		for _, u := range urls {
 			Crawl(u, depth-1, fetcher)
 		}
-		return
 	}()
-	for <-channelQuit {
-	}
+	<-channelQuit
 }
 
 func main() {
+	start := time.Now().UTC()
 	Crawl("https://golang.org/", 4, fetcher)
+	fmt.Println(time.Since(start))
 }
 
 // fakeFetcher is Fetcher that returns canned results.
